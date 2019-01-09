@@ -7,9 +7,9 @@ from transformer.Layers import EncoderLayer, DecoderLayer
 
 __author__ = "Yu-Hsiang Huang"
 
-def get_non_pad_mask(seq):
+def get_non_pad_mask(seq, dtype=torch.float):
     assert seq.dim() == 2
-    return seq.ne(Constants.PAD).type(torch.float).unsqueeze(-1)
+    return seq.ne(Constants.PAD).type(dtype).unsqueeze(-1)
 
 def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
     ''' Sinusoid position encoding table '''
@@ -63,6 +63,7 @@ class Encoder(nn.Module):
         super().__init__()
 
         n_position = len_max_seq + 1
+        self.dropout_emb = nn.Dropout(dropout)
 
         self.src_word_emb = nn.Embedding(
             n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
@@ -81,10 +82,12 @@ class Encoder(nn.Module):
 
         # -- Prepare masks
         slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)
-        non_pad_mask = get_non_pad_mask(src_seq)
 
         # -- Forward
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
+        enc_output = self.dropout_emb(enc_output)
+        
+        non_pad_mask = get_non_pad_mask(src_seq, dtype=enc_output.dtype)
 
         for enc_layer in self.layer_stack:
             enc_output, enc_slf_attn = enc_layer(
@@ -126,7 +129,7 @@ class Decoder(nn.Module):
         dec_slf_attn_list, dec_enc_attn_list = [], []
 
         # -- Prepare masks
-        non_pad_mask = get_non_pad_mask(tgt_seq)
+        non_pad_mask = get_non_pad_mask(tgt_seq, dtype=enc_output.dtype)
 
         slf_attn_mask_subseq = get_subsequent_mask(tgt_seq)
         slf_attn_mask_keypad = get_attn_key_pad_mask(seq_k=tgt_seq, seq_q=tgt_seq)
