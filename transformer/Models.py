@@ -7,9 +7,9 @@ from transformer.Layers import EncoderLayer, DecoderLayer
 
 __author__ = "Yu-Hsiang Huang"
 
-def get_non_pad_mask(seq, dtype=torch.float):
+def get_non_pad_mask(seq, padding_idx, dtype=torch.float):
     assert seq.dim() == 2
-    return seq.ne(Constants.PAD).type(dtype).unsqueeze(-1)
+    return seq.ne(padding_idx).type(dtype).unsqueeze(-1)
 
 def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
     ''' Sinusoid position encoding table '''
@@ -31,12 +31,12 @@ def get_sinusoid_encoding_table(n_position, d_hid, padding_idx=None):
 
     return torch.FloatTensor(sinusoid_table)
 
-def get_attn_key_pad_mask(seq_k, seq_q):
+def get_attn_key_pad_mask(seq_k, seq_q, padding_idx):
     ''' For masking out the padding part of key sequence. '''
 
     # Expand to fit the shape of key query attention matrix.
     len_q = seq_q.size(1)
-    padding_mask = seq_k.eq(Constants.PAD)
+    padding_mask = seq_k.eq(padding_idx)
     padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
 
     return padding_mask
@@ -58,18 +58,19 @@ class Encoder(nn.Module):
             self,
             n_src_vocab, len_max_seq, d_word_vec,
             n_layers, n_head, d_k, d_v,
-            d_model, d_inner, dropout=0.1):
+            d_model, d_inner, padding_idx,
+            dropout=0.1):
 
         super().__init__()
-
+        self.padding_idx = padding_idx
         n_position = len_max_seq + 1
         self.dropout_emb = nn.Dropout(dropout)
 
         self.src_word_emb = nn.Embedding(
-            n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
+            n_src_vocab, d_word_vec, padding_idx=padding_idx)
 
         self.position_enc = nn.Embedding.from_pretrained(
-            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
+            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=padding_idx),
             freeze=True)
 
         self.layer_stack = nn.ModuleList([
@@ -81,13 +82,13 @@ class Encoder(nn.Module):
         enc_slf_attn_list = []
 
         # -- Prepare masks
-        slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)
+        slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq, padding_idx=self.padding_idx)
 
         # -- Forward
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
         enc_output = self.dropout_emb(enc_output)
         
-        non_pad_mask = get_non_pad_mask(src_seq, dtype=enc_output.dtype)
+        non_pad_mask = get_non_pad_mask(src_seq, padding_idx=self.padding_idx, dtype=enc_output.dtype)
 
         for enc_layer in self.layer_stack:
             enc_output, enc_slf_attn = enc_layer(
@@ -108,16 +109,19 @@ class Decoder(nn.Module):
             self,
             n_tgt_vocab, len_max_seq, d_word_vec,
             n_layers, n_head, d_k, d_v,
-            d_model, d_inner, dropout=0.1):
+            d_model, d_inner, padding_idx,
+            dropout=0.1):
 
         super().__init__()
+        self.padding_idx = padding_idx
+        
         n_position = len_max_seq + 1
 
         self.tgt_word_emb = nn.Embedding(
-            n_tgt_vocab, d_word_vec, padding_idx=Constants.PAD)
+            n_tgt_vocab, d_word_vec, padding_idx=padding_idx)
 
         self.position_enc = nn.Embedding.from_pretrained(
-            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
+            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=padding_idx),
             freeze=True)
 
         self.layer_stack = nn.ModuleList([
@@ -129,13 +133,13 @@ class Decoder(nn.Module):
         dec_slf_attn_list, dec_enc_attn_list = [], []
 
         # -- Prepare masks
-        non_pad_mask = get_non_pad_mask(tgt_seq, dtype=enc_output.dtype)
+        non_pad_mask = get_non_pad_mask(tgt_seq, padding_idx=self.padding_idx, dtype=enc_output.dtype)
 
         slf_attn_mask_subseq = get_subsequent_mask(tgt_seq)
-        slf_attn_mask_keypad = get_attn_key_pad_mask(seq_k=tgt_seq, seq_q=tgt_seq)
+        slf_attn_mask_keypad = get_attn_key_pad_mask(seq_k=tgt_seq, seq_q=tgt_seq, padding_idx=self.padding_idx)
         slf_attn_mask = (slf_attn_mask_keypad + slf_attn_mask_subseq).gt(0)
 
-        dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=tgt_seq)
+        dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=tgt_seq, padding_idx=self.padding_idx)
 
         # -- Forward
         dec_output = self.tgt_word_emb(tgt_seq) + self.position_enc(tgt_pos)
@@ -163,21 +167,24 @@ class Transformer(nn.Module):
             n_src_vocab, n_tgt_vocab, len_max_seq,
             d_word_vec=512, d_model=512, d_inner=2048,
             n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1,
+            padding_idx=None,
             tgt_emb_prj_weight_sharing=True,
             emb_src_tgt_weight_sharing=True):
 
         super().__init__()
-
+        
+        if padding_idx is None: padding_idx = Constants.PAD
+            
         self.encoder = Encoder(
             n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
             d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
-            n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
+            n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v, padding_idx=padding_idx,
             dropout=dropout)
 
         self.decoder = Decoder(
             n_tgt_vocab=n_tgt_vocab, len_max_seq=len_max_seq,
             d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
-            n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
+            n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v, padding_idx=padding_idx,
             dropout=dropout)
 
         self.tgt_word_prj = nn.Linear(d_model, n_tgt_vocab, bias=False)
