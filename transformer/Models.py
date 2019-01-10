@@ -70,7 +70,7 @@ class Encoder(nn.Module):
             n_src_vocab, d_word_vec, padding_idx=padding_idx)
 
         self.position_enc = nn.Embedding.from_pretrained(
-            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=padding_idx),
+            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
             freeze=True)
 
         self.layer_stack = nn.ModuleList([
@@ -121,7 +121,7 @@ class Decoder(nn.Module):
             n_tgt_vocab, d_word_vec, padding_idx=padding_idx)
 
         self.position_enc = nn.Embedding.from_pretrained(
-            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=padding_idx),
+            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
             freeze=True)
 
         self.layer_stack = nn.ModuleList([
@@ -209,7 +209,7 @@ class Transformer(nn.Module):
 
     def forward(self, src_seq, src_pos, tgt_seq, tgt_pos):
 
-        tgt_seq, tgt_pos = tgt_seq[:, :-1], tgt_pos[:, :-1]
+#         tgt_seq, tgt_pos = tgt_seq[:, :-1], tgt_pos[:, :-1]
 
         enc_output, *_ = self.encoder(src_seq, src_pos)
         dec_output, *_ = self.decoder(tgt_seq, tgt_pos, src_seq, enc_output)
