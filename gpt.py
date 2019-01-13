@@ -485,6 +485,8 @@ class OpenAIGPTModel(OpenAIGPTPreTrainedModel):
         super(OpenAIGPTModel, self).__init__(config)
         total_embeddings_size = config.vocab_size + config.n_special + config.n_ctx
         self.embed = nn.Embedding(total_embeddings_size, config.n_embd)
+#         self.embed = nn.Embedding(config.vocab_size + config.n_special, config.n_embd)
+#         self.embed_pos = nn.Embedding(config.n_ctx, config.n_embd)
         self.drop = nn.Dropout(config.embd_pdrop)
         block = Block(config.n_ctx, config, scale=True)
         self.h = nn.ModuleList([copy.deepcopy(block) for _ in range(config.n_layer)])
@@ -526,6 +528,7 @@ class OpenAIGPTModel(OpenAIGPTPreTrainedModel):
         # Add the position information to the input embeddings
         # h = e.sum(dim=2)
         hidden_states = inputs_embeds + position_embeds + token_type_embeds
+        hidden_states = self.drop(hidden_states)
         for block in self.h:
             hidden_states = block(hidden_states)
         return hidden_states.view(*input_shape, hidden_states.size(-1))
